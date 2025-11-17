@@ -1,0 +1,87 @@
+name: Build GKI Kernel Android12-5.10
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-gki:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      # Official kernel manifest branch for Android 12 (Linux 5.10)
+      KERNEL_MANIFEST_URL: "https://android.googlesource.com/kernel/manifest"
+      KERNEL_MANIFEST_BRANCH: "android12-5.10"
+      BUILD_CONFIG: "common/build.config.gki.aarch64"
+      OUT_DIR: "out"
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies & repo tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python-is-python3 curl --no-install-recommends
+          curl https://storage.googleapis.com/git-repo-downloads/repo > /usr/local/bin/repo
+          sudo chmod a+x /usr/local/bin/repo
+
+      - name: Prepare kernel-src directory
+        run: |
+          mkdir -p kernel-src
+          cd kernel-src
+
+      - name: Repo init (kernel manifest)
+        run: |
+          cd kernel-src
+          repo init -u "$KERNEL_MANIFEST_URL" -b "$KERNEL_MANIFEST_BRANCH"
+
+      - name: Repo sync (shallow where possible)
+        run: |
+          cd kernel-src
+          repo sync -c --no-tags --no-clone-bundle -j4
+
+      - name: Show kernel tree heads
+        run: |
+          cd kernel-src
+          echo "Top-level repos:" && ls -1
+
+      - name: Build kernel (legacy build.sh)
+        working-directory: kernel-src
+        run: |
+          # Ensure BUILD_CONFIG points to GKI aarch64 config
+          export BUILD_CONFIG="$BUILD_CONFIG"
+          # Run the provided kernel build wrapper
+          BUILD_CONFIG=${BUILD_CONFIG} build/build.sh
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          # Copy common dist outputs
+          cp -r kernel-src/out/**/dist artifacts/ 2>/dev/null || true
+          # Copy any generated modules
+          mkdir -p artifacts/modules || true
+          find kernel-src/out -name '*.ko' -exec cp --parents {} artifacts/ \; || true
+          ls -R artifacts || true
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gki-kernel-artifacts
+          path: artifacts/**
+
+      - name: (Optional) Create GitHub Release with artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: gki-android12-5.10-${{ github.run_number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup (free space)
+        if: always()
+        run: |
+          sudo rm -rf kernel-src || true
+          df -h || true
