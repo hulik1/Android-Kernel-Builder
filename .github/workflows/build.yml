@@ -1,66 +1,38 @@
-name: Build AOSP GKI 5.10 Kernel
 
+name: GKI Kernel CI
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      KERNEL_MANIFEST_URL: https://android.googlesource.com/kernel/manifest
-      KERNEL_MANIFEST_BRANCH: android12-5.10-lts
-      BUILD_CONFIG: common/build.config.gki.aarch64
-      OUT_DIR: out
-      CCACHE_COMPRESS: "1"
-      CCACHE_DIR: "${{ github.workspace }}/.ccache"
-
     steps:
+      - name: Checkout (thin)
+        uses: actions/checkout@v4
 
-    - name: Checkout builder repository
-      uses: actions/checkout@v3
+      - name: Install repo (needed for AOSP)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python-is-python3 curl
+          curl https://storage.googleapis.com/git-repo-downloads/repo > /usr/local/bin/repo
+          sudo chmod a+x /usr/local/bin/repo
 
-    - name: Install required packages
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y repo bc bison flex build-essential ccache \
-        curl git python3 zip libssl-dev libncurses5-dev libelf-dev \
-        pkg-config rsync ca-certificates gnupg gawk
+      - name: Repo init + sync (kernel manifest)
+        run: |
+          mkdir gki && cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1
+          repo sync -c --no-tags --no-clone-bundle -j2
 
-    - name: Setup ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: gki-510
+      - name: Build kernel (legacy build script)
+        run: |
+          cd gki
+          export BUILD_CONFIG=common/build.config.gki.aarch64
+          build/build.sh
 
-    - name: Sync Google GKI kernel sources
-      run: |
-        mkdir kernel-src
-        cd kernel-src
-        repo init -u "$KERNEL_MANIFEST_URL" -b "$KERNEL_MANIFEST_BRANCH"
-        repo sync -j4 --force-sync
-
-    - name: Build GKI kernel
-      run: |
-        cd kernel-src
-        echo ">>> Starting kernel build..."
-        BUILD_CONFIG=$BUILD_CONFIG \
-        OUT_DIR=$OUT_DIR \
-        ./build/build.sh
-
-    - name: Upload kernel Image
-      uses: actions/upload-artifact@v3
-      with:
-        name: GKI-Image
-        path: kernel-src/out/android12-5.10/dist/Image
-
-    - name: Upload kernel modules
-      uses: actions/upload-artifact@v3
-      with:
-        name: modules
-        path: kernel-src/out/android12-5.10/dist/*.ko
-
-    - name: Upload entire dist folder
-      uses: actions/upload-artifact@v3
-      with:
-        name: dist
-        path: kernel-src/out/android12-5.10/dist/*
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gki-artifacts
+          path: gki/out/**/*
