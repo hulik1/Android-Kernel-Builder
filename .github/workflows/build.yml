@@ -25,9 +25,11 @@ jobs:
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10-2025-05
           repo sync -c --no-tags --no-clone-bundle -j2
 
-      - name: Add KernelSU
+      - name: Apply KernelSU
         run: |
+          cd kernel-src/kernel/common
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+
           
           
       - name: Build kernel (legacy build script)
